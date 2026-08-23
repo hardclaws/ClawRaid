@@ -5,14 +5,12 @@ community — no server, no backend, no secrets. It shows:
 
 Channels are sorted into **three tabs**, exactly like the popular raid pickers:
 
-1. **Same Game** — channels you follow who are live in **your current category**
-   (the game you’re streaming right now).
-2. **Other Categories** — channels you follow who are live in a **different**
-   category.
-3. **Discover** — live channels in your category(ies) that you **don’t** follow
-   yet, weighted toward channels with a **similar viewer size** to yours (easiest
-   to build reciprocity and grow together). Track extra categories here and hit
-   **Follow** / **Raid** straight from the card.
+1. **Same Game** — *everyone* live in **your current category** (the game you’re
+   streaming now), with the channels you follow listed **first**.
+2. **Following** — *everyone you follow who is live*, sortable by viewers or
+   category. Click any **category name** to jump to Discover filtered to it.
+3. **Discover** — live channels in your categories you **don’t** follow yet,
+   with a **language filter**; tracked categories show their box-art thumbnail.
 
 Every card shows title, category, viewer count, uptime, language, tags, and
 one-click **Raid** / **Open** / **Follow** buttons. A search box filters across

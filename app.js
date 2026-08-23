@@ -5,28 +5,26 @@
  * API : Twitch Helix. See README for setup.
  *
  * Three tabs:
- *   • Same Game       – channels you follow, live in YOUR current category
- *   • Other Categories – your followed-live channels in other categories,
- *                         grouped; click a category to see EVERYONE in it
- *   • Discover         – live channels in your categories you DON'T follow
+ *   • Same Game    – EVERYONE live in your current category (followed first)
+ *   • Following    – everyone you follow who is live (sortable; click a
+ *                    category to jump to Discover filtered to it)
+ *   • Discover     – live channels in your categories you DON'T follow
+ *                    (+ tracked categories w/ language filter)
  *
- * No external dependencies, no build step. Works in OBS Custom Browser Dock,
- * OBS Browser Source, or any modern browser.
+ * No external dependencies, no build step.
  * ========================================================================= */
 (function () {
   "use strict";
 
-  /* ----------------------------- Constants ----------------------------- */
   const API = "https://api.twitch.tv/helix";
   const AUTH = "https://id.twitch.tv/oauth2/authorize";
 
   const BASE_SCOPES = ["user:read:follows", "user:edit:follows"];
   const RAID_SCOPE = "channel:manage:raids";
 
-  // Owner: paste your Twitch Client ID here to enable ZERO-SETUP login for your
-  // users. With this set, visitors just click "Log in with Twitch" — no dev
-  // console required. (The Client ID is public by design; it's sent in every
-  // Twitch API request.) Leave blank to let each user supply their own.
+  // Owner: paste your Twitch Client ID here to enable ZERO-SETUP login.
+  // The Client ID is public by design (sent in every request). Leave blank to
+  // let each user supply their own.
   const EMBEDDED_CLIENT_ID = "";
 
   const STORE = {
@@ -50,7 +48,6 @@
     discoverFirst: 30,
   };
 
-  /* ----------------------------- State --------------------------------- */
   const S = {
     token: null,
     exp: 0,
@@ -63,10 +60,14 @@
     followedIds: null,
     derivedCategories: [],
     discoverStreams: [],
+    sameGameStreams: null, // everyone live in myGameId (when live)
+    filterGame: null, // { id, name } – Discover filtered to this category
+    filterStreams: null,
     discoverFirst: 30,
-    viewOpen: new Set(), // tracked-category ids whose live streams are expanded
-    viewCache: {}, // gameId -> streams (all) for the expanded tracked view
-    openOther: {}, // gameId -> { name, loading, streams } for Other-tab drill-down
+    viewOpen: new Set(),
+    viewCache: {},
+    langHide: new Set(), // hidden language codes in Discover
+    _viewLoading: null,
     sort: "viewers-desc",
     activeTab: null,
     searchTerm: "",
@@ -165,7 +166,6 @@
     return `<div class="empty">${esc(msg)}</div>`;
   }
 
-  /* ------------------------------- Icons ------------------------------- */
   const ICON = {
     bolt: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>',
     ext: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3h7v7M21 3l-9 9M19 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5"/></svg>',
@@ -176,10 +176,8 @@
     close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>',
     twitch: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 2 3 6v13h4v3h3l3-3h4l5-5V2zm16 11-3 3h-5l-3 3v-3H6V4h14zM15 7h2v5h-2zm-6 0h2v5H9z"/></svg>',
     search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>',
-    caret: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg>',
   };
 
-  /* ------------------------------- Toast ------------------------------- */
   function toast(msg, kind) {
     const root = $("#toast-root");
     const t = document.createElement("div");
@@ -216,31 +214,29 @@
     }
     return res.json();
   }
-
-  async function apiAll(path, params, cap) {
+  async function apiAll(path, p, cap) {
     const out = [];
     let cursor = null;
     let pages = 0;
     cap = cap || 300;
     do {
-      const p = Object.assign({}, params, { first: 100 });
-      if (cursor) p.after = cursor;
-      const data = await api(path, { params: p });
+      const q = Object.assign({}, p, { first: 100 });
+      if (cursor) q.after = cursor;
+      const data = await api(path, { params: q });
       out.push.apply(out, data.data || []);
       cursor = data.pagination && data.pagination.cursor;
       pages++;
     } while (cursor && out.length < cap && pages < 30);
     return out;
   }
-
   async function getMe() {
-    const data = await api("/users");
-    return data.data && data.data[0];
+    const d = await api("/users");
+    return d.data && d.data[0];
   }
   async function getMyStream() {
     if (!S.user) return null;
-    const data = await api("/streams", { params: { user_id: S.user.id, first: 1 } });
-    return data.data && data.data[0];
+    const d = await api("/streams", { params: { user_id: S.user.id, first: 1 } });
+    return d.data && d.data[0];
   }
   async function getFollowedStreams() {
     if (!S.user) return [];
@@ -252,13 +248,13 @@
     return new Set(list.map((f) => f.broadcaster_id));
   }
   async function resolveGame(name) {
-    const data = await api("/search/categories", { params: { query: name, first: 10 } });
-    const exact = data.data.find((g) => g.name.toLowerCase() === name.toLowerCase());
-    return exact || data.data[0] || null;
+    const d = await api("/search/categories", { params: { query: name, first: 10 } });
+    const exact = d.data.find((g) => g.name.toLowerCase() === name.toLowerCase());
+    return exact || d.data[0] || null;
   }
   async function getStreamsByGame(gameId, first) {
-    const data = await api("/streams", { params: { game_id: gameId, first: first || 30 } });
-    return data.data || [];
+    const d = await api("/streams", { params: { game_id: gameId, first: first || 30 } });
+    return d.data || [];
   }
   async function startRaid(toId) {
     return api("/raids", { method: "POST", params: { from_broadcaster_id: S.user.id, to_broadcaster_id: toId } });
@@ -294,7 +290,6 @@
     u.searchParams.set("state", state);
     return u.toString();
   }
-
   function handleRedirect() {
     if (!location.hash.includes("access_token")) return false;
     const frag = new URLSearchParams(location.hash.slice(1));
@@ -313,7 +308,6 @@
     save(STORE.exp, S.exp);
     return true;
   }
-
   function login() {
     if (!S.clientId) {
       openSettings(true);
@@ -322,7 +316,6 @@
     }
     location.href = buildAuthUrl();
   }
-
   function logout() {
     S.token = null;
     S.exp = 0;
@@ -354,14 +347,17 @@
       S.myGameName = (myStream && myStream.game_name) || null;
       S.followedStreams = followed;
 
-      if (!S.followedIds || S.cycle % 5 === 1) {
-        S.followedIds = await getFollowedIds();
-      }
-      buildDerivedCategories();
+      if (!S.followedIds || S.cycle % 5 === 1) S.followedIds = await getFollowedIds();
 
-      if (force || S.cycle % settings.refreshSuggestionsEvery === 0 || !S.discoverStreams.length) {
-        await buildDiscover();
-      }
+      // Everyone live in your current category (for Same Game).
+      S.sameGameStreams = S.myGameId ? await getStreamsByGame(S.myGameId, 100).catch(() => []) : null;
+
+      // Keep a filtered Discover view fresh if one is active.
+      if (S.filterGame) S.filterStreams = await getStreamsByGame(S.filterGame.id, 100).catch(() => []);
+
+      buildDerivedCategories();
+      if (force || S.cycle % settings.refreshSuggestionsEvery === 0 || !S.discoverStreams.length) await buildDiscover();
+
       renderHeader();
       renderTabs();
     } catch (e) {
@@ -387,15 +383,11 @@
     S.derivedCategories = Array.from(map.values()).sort((a, b) => b.streams.length - a.streams.length);
   }
 
-  function buildDiscover() {
+  async function buildDiscover() {
     if (S.demo) {
       S.discoverStreams = S._demoDiscover || [];
       return;
     }
-    // Synchronous part done in async wrapper below.
-    return _buildDiscover();
-  }
-  async function _buildDiscover() {
     if (!S.followedIds) S.followedIds = await getFollowedIds();
     const myV = S.meViewers;
     const gameSet = new Set();
@@ -439,24 +431,19 @@
       case "category":
         arr.sort((a, b) => (a.game_name || "").localeCompare(b.game_name || ""));
         break;
-      case "viewers-desc":
       default:
         arr.sort((a, b) => (b.viewer_count || 0) - (a.viewer_count || 0));
-        break;
     }
     return arr;
   }
-
-  function groupByGame(streams) {
-    const map = new Map();
-    for (const s of streams) {
-      if (!s.game_id) continue;
-      if (!map.has(s.game_id)) map.set(s.game_id, { id: s.game_id, name: s.game_name, streams: [] });
-      map.get(s.game_id).streams.push(s);
-    }
-    return Array.from(map.values()).sort((a, b) => b.streams.length - a.streams.length);
+  function langSet(list) {
+    const set = new Set();
+    for (const s of list || []) if (s.language) set.add(s.language);
+    return Array.from(set).sort();
   }
-
+  function applyLang(list) {
+    return (list || []).filter((s) => !s.language || !S.langHide.has(s.language));
+  }
   function sortControl() {
     const opts = [
       ["viewers-desc", "Viewers (high → low)"],
@@ -468,12 +455,20 @@
       .map(([v, l]) => `<option value="${v}" ${S.sort === v ? "selected" : ""}>${l}</option>`)
       .join("")}</select></div>`;
   }
-
+  function langFilterChips(langs) {
+    const allOn = S.langHide.size === 0;
+    return `<div class="langfilter"><span class="lf-label">Languages:</span>
+      <button class="langchip ${allOn ? "on" : ""}" data-action="lang-all">All</button>
+      ${langs
+        .map((l) => `<button class="langchip ${S.langHide.has(l) ? "off" : "on"}" data-action="lang-toggle" data-lang="${esc(l)}">${esc(l)}</button>`)
+        .join("")}</div>`;
+  }
   function sectionHead(title, sub) {
     return `<div class="sechead"><h2>${title}</h2>${sub ? `<div class="sechead-sub">${sub}</div>` : ""}</div>`;
   }
 
-  function streamCard(s) {
+  function streamCard(s, opts) {
+    opts = opts || {};
     const thumb = s.thumbnail_url
       ? thumbUrl(s.thumbnail_url, 320, 180)
       : placeholder(s.user_login || s.user_name, 320, 180, (s.user_name || "?").slice(0, 2));
@@ -485,27 +480,18 @@
     const followBtn = isFollowed
       ? `<button class="btn follow followed" disabled>${ICON.heart} Following</button>`
       : `<button class="btn follow" data-action="follow" data-uid="${esc(s.user_id)}" data-login="${esc(s.user_login)}">${ICON.userPlus} Follow</button>`;
+    const cat = opts.catLink
+      ? `<span class="cat catlink" data-action="filter-cat" data-id="${esc(s.game_id)}" data-name="${esc(s.game_name || "")}">${esc(s.game_name || "—")}</span>`
+      : `<span class="cat">${esc(s.game_name || "—")}</span>`;
     return `
       <div class="card">
-        <div class="thumb">
-          <img src="${thumb}" alt="" loading="lazy"/>
-          <span class="live">LIVE</span>
-          <span class="viewers">${fmt(s.viewer_count)}</span>
-        </div>
+        <div class="thumb"><img src="${thumb}" alt="" loading="lazy"/><span class="live">LIVE</span><span class="viewers">${fmt(s.viewer_count)}</span></div>
         <div class="body">
           <div class="title">${esc(s.title)}</div>
           <div class="name">${esc(s.user_name)} ${s.is_verified ? `<span class="verified" title="Verified">✓</span>` : ""}</div>
-          <div class="meta">
-            <span class="cat">${esc(s.game_name || "—")}</span>
-            <span>· ${fmtUptime(s.started_at)}</span>
-            ${s.language ? `<span>· ${esc(s.language)}</span>` : ""}
-          </div>
+          <div class="meta">${cat}<span>· ${fmtUptime(s.started_at)}</span>${s.language ? `<span>· ${esc(s.language)}</span>` : ""}</div>
           ${tags ? `<div class="tags">${tags}</div>` : ""}
-          <div class="actions">
-            ${raidBtn}
-            <button class="btn open" data-action="open" data-login="${esc(s.user_login)}">${ICON.ext} Open</button>
-            ${followBtn}
-          </div>
+          <div class="actions">${raidBtn}<button class="btn open" data-action="open" data-login="${esc(s.user_login)}">${ICON.ext} Open</button>${followBtn}</div>
         </div>
       </div>`;
   }
@@ -514,47 +500,32 @@
     const bar = $("#topbar");
     const expIn = S.exp ? Math.max(0, Math.floor((S.exp * 1000 - Date.now()) / 60000)) : 0;
     const meHtml = S.user
-      ? `<div class="me">
-           <img src="${S.user.profile_image_url || placeholder(S.user.login, 40, 40)}" alt=""/>
-           <span>${esc(S.user.display_name)}</span>
-           ${S.meViewers > 0 ? `<span class="livepill">${fmt(S.meViewers)} viewers</span>` : ""}
-           <span class="hint" title="Token expires in ~${expIn} min">⏳ ${expIn}m</span>
-         </div>`
+      ? `<div class="me"><img src="${S.user.profile_image_url || placeholder(S.user.login, 40, 40)}" alt=""/><span>${esc(S.user.display_name)}</span>${S.meViewers > 0 ? `<span class="livepill">${fmt(S.meViewers)} viewers</span>` : ""}<span class="hint" title="Token expires in ~${expIn} min">⏳ ${expIn}m</span></div>`
       : "";
     bar.innerHTML = `
-      <div class="brand">
-        <span class="logo">${ICON.twitch}</span>
-        <span class="txt">Clawraid</span>
-        ${S.demo ? `<span class="demo-badge">DEMO</span>` : ""}
-      </div>
-      <div class="spacer"></div>
-      ${meHtml}
+      <div class="brand"><span class="logo">${ICON.twitch}</span><span class="txt">Clawraid</span>${S.demo ? `<span class="demo-badge">DEMO</span>` : ""}</div>
+      <div class="spacer"></div>${meHtml}
       <button class="iconbtn" data-action="refresh" title="Refresh now">${ICON.refresh}</button>
-      <button class="iconbtn" data-action="settings" title="Settings">${ICON.gear}</button>
-    `;
+      <button class="iconbtn" data-action="settings" title="Settings">${ICON.gear}</button>`;
     if (settings.compact) $("#app").classList.add("compact");
     else $("#app").classList.remove("compact");
   }
 
   function renderTabs() {
     const c = $("#content");
-    const sameCount = S.myGameId ? S.followedStreams.filter((s) => s.game_id === S.myGameId).length : 0;
-    const otherStreams = S.myGameId ? S.followedStreams.filter((s) => s.game_id !== S.myGameId) : S.followedStreams;
-    const otherCount = otherStreams.length;
-    const discCount = (S.discoverStreams || []).length;
+    const sameCount = S.sameGameStreams ? S.sameGameStreams.length : 0;
+    const folCount = S.followedStreams.length;
+    const discCount = S.filterGame ? (S.filterStreams ? S.filterStreams.length : 0) : (S.discoverStreams || []).length;
 
     if (!S.activeTab) S.activeTab = S.myGameId && sameCount > 0 ? "same" : "discover";
 
     c.innerHTML = `
       <div class="tabs">
         <button class="tab ${S.activeTab === "same" ? "active" : ""}" data-action="tab" data-tab="same">Same Game <span class="count">${sameCount}</span></button>
-        <button class="tab ${S.activeTab === "other" ? "active" : ""}" data-action="tab" data-tab="other">Other Categories <span class="count">${otherCount}</span></button>
-        <button class="tab ${S.activeTab === "discover" ? "active" : ""}" data-action="tab" data-tab="discover">Discover <span class="count">${discCount}</span></button>
+        <button class="tab ${S.activeTab === "following" ? "active" : ""}" data-action="tab" data-tab="following">Following <span class="count">${folCount}</span></button>
+        <button class="tab ${S.activeTab === "discover" ? "active" : ""}" data-action="tab" data-tab="discover">${S.filterGame ? "Discover: " + esc(S.filterGame.name) : "Discover"} <span class="count">${discCount}</span></button>
       </div>
-      <div class="searchrow">
-        <span class="searchico">${ICON.search}</span>
-        <input type="text" id="search" placeholder="Search channels…" value="${esc(S.searchTerm || "")}" />
-      </div>
+      <div class="searchrow"><span class="searchico">${ICON.search}</span><input type="text" id="search" placeholder="Search channels…" value="${esc(S.searchTerm || "")}" /></div>
       <div id="tab-content"></div>`;
     selectTab(S.activeTab);
   }
@@ -564,79 +535,78 @@
     $$(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
     const tc = document.getElementById("tab-content");
     if (!tc) return;
-
     const q = (S.searchTerm || "").toLowerCase();
-    const match = (s) =>
-      !q || (s.user_name || "").toLowerCase().includes(q) || (s.title || "").toLowerCase().includes(q);
+    const match = (s) => !q || (s.user_name || "").toLowerCase().includes(q) || (s.title || "").toLowerCase().includes(q);
 
-    if (tab === "same") {
-      const list = sortStreams(S.myGameId ? S.followedStreams.filter((s) => s.game_id === S.myGameId) : []).filter(match);
-      tc.innerHTML =
-        sectionHead("Same Game", S.myGameName ? `Live channels you follow in ${esc(S.myGameName)}` : "Channels you follow that are live in your current category") +
-        sortControl() +
-        (list.length ? list.map(streamCard).join("") : emptyState(S.myGameId ? `No followed channels are live in ${esc(S.myGameName || "your category")} right now.` : "You're not live — go live to populate Same Game."));
-    } else if (tab === "other") {
-      renderOther(tc, q);
-    } else if (tab === "discover") {
-      renderDiscover(tc, q);
+    if (tab === "same") renderSame(tc, match);
+    else if (tab === "following") renderFollowing(tc, match);
+    else if (tab === "discover") renderDiscover(tc, match);
+  }
+
+  function renderSame(tc, match) {
+    if (!S.myGameId || !S.sameGameStreams) {
+      tc.innerHTML = emptyState("You're not live — go live to populate Same Game with everyone in your category.");
+      return;
     }
+    const all = S.sameGameStreams;
+    const followed = sortStreams(all.filter((s) => S.followedIds && S.followedIds.has(s.user_id))).filter(match);
+    const others = sortStreams(all.filter((s) => !(S.followedIds && S.followedIds.has(s.user_id)))).filter(match);
+    let html = sectionHead("Same Game", `Everyone live in <b>${esc(S.myGameName)}</b> — people you follow are listed first.`) + sortControl();
+    if (followed.length) html += `<h3 class="subhead">People you follow (${followed.length})</h3>` + followed.map(streamCard).join("");
+    if (others.length) html += `<h3 class="subhead">Others in ${esc(S.myGameName)} (${others.length})</h3>` + others.map(streamCard).join("");
+    if (!followed.length && !others.length) html += emptyState("No one is live in " + esc(S.myGameName) + " right now.");
+    tc.innerHTML = html;
   }
 
-  function renderOther(tc, q) {
-    const groups = groupByGame(S.myGameId ? S.followedStreams.filter((s) => s.game_id !== S.myGameId) : S.followedStreams);
-    const intro = `Your followed channels that are live in a <b>different</b> category. Click any category to see <b>everyone</b> streaming in it.`;
-    const groupsHtml = groups.length
-      ? groups
-          .map((g) => {
-            const open = S.openOther[g.id];
-            const streams = open ? sortStreams(open.streams) : [];
-            return `
-            <div class="catgroup">
-              <button class="cathead" data-action="other-cat" data-id="${esc(g.id)}" data-name="${esc(g.name)}">
-                <span class="ch-name">${esc(g.name)}</span>
-                <span class="ch-meta">${g.streams.length} of your follows</span>
-                <span class="ch-caret">${open ? "▾" : "▸"}</span>
-              </button>
-              ${
-                open
-                  ? `<div class="discovery">${open.loading ? `<div class="loading">Loading live channels…</div>` : streams.length ? streams.map(streamCard).join("") : emptyState("No one is live in " + esc(g.name) + " right now.")}</div>`
-                  : ""
-              }
-            </div>`;
-          })
-          .join("")
-      : emptyState("None of the channels you follow are live in other categories. Follow more streamers, or track a category in Discover to browse it.");
-    tc.innerHTML = sectionHead("Other Categories", intro) + groupsHtml;
+  function renderFollowing(tc, match) {
+    const list = sortStreams(S.followedStreams).filter(match);
+    tc.innerHTML =
+      sectionHead("Following", "Everyone you follow who is live. Click a <b>category name</b> to jump to Discover filtered to it.") +
+      sortControl() +
+      (list.length ? list.map((s) => streamCard(s, { catLink: true })).join("") : emptyState("None of the channels you follow are live right now."));
   }
 
-  function renderDiscover(tc, q) {
-    const list = sortStreams(S.discoverStreams || []).filter(
-      (s) => !q || (s.user_name || "").toLowerCase().includes(q) || (s.title || "").toLowerCase().includes(q)
-    );
+  function renderDiscover(tc, match) {
+    // Filtered view: everyone live in a specific category.
+    if (S.filterGame) {
+      const streams = applyLang(sortStreams(S.filterStreams || []).filter(match));
+      const langs = langSet(S.filterStreams || []);
+      tc.innerHTML =
+        sectionHead("Discover", `Everyone live in <b>${esc(S.filterGame.name)}</b>`) +
+        `<button class="btn" data-action="clear-filter" style="margin:0 0 8px">✕ Clear filter</button>` +
+        sortControl() +
+        langFilterChips(langs) +
+        (streams.length ? streams.map(streamCard).join("") : emptyState("No one is live in " + esc(S.filterGame.name) + " right now."));
+      return;
+    }
+
+    const list = applyLang(sortStreams(S.discoverStreams || []).filter(match));
+    const langs = langSet(S.discoverStreams || []);
     const hint = S.myGameId
       ? `Live channels in <b>${esc(S.myGameName)}</b> + your tracked categories that you don't follow yet.`
-      : `Live channels in your tracked/derived categories you don't follow yet.` +
-        (S.meViewers > 0 ? ` Sized near your ${fmt(S.meViewers)} viewers.` : "");
+      : `Live channels in your tracked/derived categories you don't follow yet.` + (S.meViewers > 0 ? ` Sized near your ${fmt(S.meViewers)} viewers.` : "");
 
     const catManage = settings.categories
-      .map((c) => {
-        const open = S.viewOpen.has(c.id);
-        const streams = open ? sortStreams(S.viewCache[c.id] || []) : null;
+      .map((cat) => {
+        const open = S.viewOpen.has(cat.id);
+        const streams = open ? sortStreams(S.viewCache[cat.id] || []) : null;
+        const thumb = cat.box_art_url ? `<img class="catthumb" src="${thumbUrl(cat.box_art_url, 40, 56)}" alt=""/>` : "";
         return `
         <div class="catmanage">
           <div class="chip">
-            <div><div class="cname">${esc(c.name)}</div><div class="cmeta">${streams ? streams.length + " live" : "tracked"}</div></div>
-            <button class="btn cbtn" data-action="view-cat" data-id="${esc(c.id)}" data-name="${esc(c.name)}">${open ? "Hide" : "View"}</button>
-            <button class="btn cbtn" data-action="remove-cat" data-name="${esc(c.name)}" title="Remove">${ICON.close}</button>
+            ${thumb}
+            <div><div class="cname">${esc(cat.name)}</div><div class="cmeta">${streams ? streams.length + " live" : "tracked"}</div></div>
+            <button class="btn cbtn" data-action="view-cat" data-id="${esc(cat.id)}" data-name="${esc(cat.name)}">${open ? "Hide" : "View"}</button>
+            <button class="btn cbtn" data-action="remove-cat" data-name="${esc(cat.name)}" title="Remove">${ICON.close}</button>
           </div>
           ${
             open
               ? `<div class="discovery">${
-                  S._viewLoading === c.id
+                  S._viewLoading === cat.id
                     ? `<div class="loading">Loading live channels…</div>`
                     : streams.length
                     ? streams.map(streamCard).join("")
-                    : emptyState("No live streams in " + esc(c.name) + " right now.")
+                    : emptyState("No live streams in " + esc(cat.name) + " right now.")
                 }</div>`
               : ""
           }
@@ -646,10 +616,8 @@
 
     tc.innerHTML =
       sectionHead("Discover", hint) +
-      `<div class="cat-add">
-        <input type="text" id="cat-input" placeholder="Type to search a category (e.g. Just Chatting)…" autocomplete="off" />
-        <button class="btn raid" data-action="add-cat">+ Track</button>
-      </div>
+      langFilterChips(langs) +
+      `<div class="cat-add"><input type="text" id="cat-input" placeholder="Type to search a category (e.g. Just Chatting)…" autocomplete="off" /><button class="btn raid" data-action="add-cat">+ Track</button></div>
       <div id="cat-suggest" class="suggest"></div>
       ${settings.categories.length ? `<div class="cats">${catManage}</div>` : `<div class="hint" style="font-size:11px;color:var(--text-faint);margin:4px 0 8px">No categories tracked yet — search above and pick a match, or type a name and hit + Track.</div>`}
       <h3 class="subhead">Not-yet-followed (Discover)</h3>
@@ -664,7 +632,7 @@
     c.innerHTML = `
       <div class="setup">
         <h1>${ICON.twitch} Clawraid ${S.demo ? `<span class="demo-badge">DEMO</span>` : ""}</h1>
-        <p>A client-side OBS dock that helps you find who to raid and grow your community — live channels you follow, sorted into Same Game / Other Categories / Discover.</p>
+        <p>A client-side OBS dock that helps you find who to raid and grow your community — live channels you follow, sorted into Same Game / Following / Discover.</p>
         ${
           S.demo
             ? `<div class="banner">Demo mode uses fake data so you can preview the layout. Connect a real Twitch account to use it for real.</div>`
@@ -673,37 +641,29 @@
         ${
           hasId
             ? `<p class="hint" style="font-size:12px;color:var(--text-dim)">Log in with your Twitch account to load your live follows, categories, and raid targets.</p>`
-            : `<div class="field">
-                <label>Twitch Client ID</label>
-                <input type="text" id="setup-client" placeholder="Paste the Client ID from your Twitch app" value="${esc(S.clientId)}" />
-                <div class="hint" style="font-size:11px;color:var(--text-faint);margin-top:6px">
-                  Register a free app at <code>dev.twitch.tv/console/apps</code>. Set the OAuth Redirect URL to exactly:<br/>
-                  <code id="setup-redirect">${esc(redirectUri())}</code>
-                </div>
-              </div>`
+            : `<div class="field"><label>Twitch Client ID</label><input type="text" id="setup-client" placeholder="Paste the Client ID from your Twitch app" value="${esc(S.clientId)}" /><div class="hint" style="font-size:11px;color:var(--text-faint);margin-top:6px">Register a free app at <code>dev.twitch.tv/console/apps</code>. Set the OAuth Redirect URL to exactly:<br/><code id="setup-redirect">${esc(redirectUri())}</code></div></div>`
         }
         <button class="connect" data-action="connect">${hasId ? "Log in with Twitch" : "Connect with Twitch"}</button>
         <button class="demo" data-action="demo">View demo with sample data</button>
       </div>`;
-    $("#topbar").innerHTML = `
-      <div class="brand"><span class="logo">${ICON.twitch}</span><span class="txt">Clawraid</span></div>`;
+    $("#topbar").innerHTML = `<div class="brand"><span class="logo">${ICON.twitch}</span><span class="txt">Clawraid</span></div>`;
   }
 
   /* --------------------------- Demo (no network) ----------------------- */
   function renderDemo() {
     const games = ["Just Chatting", "Science & Technology", "Art", "Software and Game Development", "Retro"];
     const names = ["PixelPioneer", "CodeWithMia", "SynthWaveSam", "RetroRanger", "ArtfulAda", "StreamSage", "NightOwlNate", "QuestQueen", "BitBard", "LoopLucas", "MapleMorgan", "EchoEllis"];
-    const makeStream = (i, game) => ({
+    const mk = (i, game) => ({
       user_id: "d" + i,
-      user_login: names[i].toLowerCase(),
-      user_name: names[i],
+      user_login: names[i] ? names[i].toLowerCase() : "streamer" + i,
+      user_name: names[i] || "Streamer" + i,
       game_id: "g" + i,
       game_name: game,
       viewer_count: Math.floor(20 + Math.random() * 900),
       title: "Building cool things & chatting with you all! " + (i % 3 === 0 ? "🎉" : ""),
       thumbnail_url: "",
       started_at: new Date(Date.now() - (i + 1) * 9 * 60000).toISOString(),
-      language: "en",
+      language: ["en", "en", "es", "de", "en", "fr"][i % 6],
       tags: ["English", i % 2 ? "Creative" : "Chill"],
     });
     S.user = { id: "me", login: "YourChannel", display_name: "YourChannel", profile_image_url: "" };
@@ -711,19 +671,24 @@
     S.myGameId = "g0";
     S.myGameName = "Just Chatting";
     S.followedIds = new Set(["d0", "d1", "d2"]);
-    S.followedStreams = [makeStream(0, "Just Chatting"), makeStream(1, "Science & Technology"), makeStream(2, "Art")];
+    S.followedStreams = [mk(0, "Just Chatting"), mk(1, "Science & Technology"), mk(2, "Art")];
     S.derivedCategories = [
       { id: "g0", name: "Just Chatting", streams: [S.followedStreams[0]] },
       { id: "g1", name: "Science & Technology", streams: [S.followedStreams[1]] },
       { id: "g2", name: "Art", streams: [S.followedStreams[2]] },
     ];
-    S._demoDiscover = [3, 4, 5, 6, 7, 8, 9, 10, 11].map((i) => makeStream(i, games[i % games.length]));
+    // Same Game = everyone in Just Chatting (you follow d0; d20/d21 are others).
+    S.sameGameStreams = [
+      S.followedStreams[0],
+      Object.assign(mk(20, "Just Chatting"), { user_id: "o1", user_login: "otherone", user_name: "OtherOne" }),
+      Object.assign(mk(21, "Just Chatting"), { user_id: "o2", user_login: "anotherstream", user_name: "AnotherStream" }),
+    ];
+    S._demoDiscover = [3, 4, 5, 6, 7, 8, 9, 10, 11].map((i) => mk(i, games[i % games.length]));
     S._demoDiscover = S._demoDiscover.filter((s) => !S.followedIds.has(s.user_id));
     S.discoverStreams = S._demoDiscover;
     S.searchTerm = "";
     S.activeTab = "same";
     S._viewLoading = null;
-
     renderHeader();
     renderTabs();
   }
@@ -745,18 +710,9 @@
       <header>Settings <button class="x" data-action="close-modal">×</button></header>
       <div class="body">
         <h3>Twitch connection</h3>
-        <div class="setting-row">
-          <div><label>Client ID</label><div class="hint">From dev.twitch.tv/console/apps</div></div>
-          <input type="text" id="set-client" value="${esc(S.clientId)}" style="width:200px"/>
-        </div>
-        <div class="setting-row">
-          <div><label>OAuth Redirect URL</label><div class="hint">Register this exact URL in your Twitch app</div></div>
-          <input type="text" id="set-redirect" value="${esc(r)}" style="width:240px"/>
-        </div>
-        <div class="setting-row">
-          <div><label>Enable raid starting</label><div class="hint">Needs the channel:manage:raids scope. If off, only quick links are shown.</div></div>
-          <label class="switch"><input type="checkbox" id="set-raids" ${settings.raidsEnabled ? "checked" : ""}/><span class="slider"></span></label>
-        </div>
+        <div class="setting-row"><div><label>Client ID</label><div class="hint">From dev.twitch.tv/console/apps</div></div><input type="text" id="set-client" value="${esc(S.clientId)}" style="width:200px"/></div>
+        <div class="setting-row"><div><label>OAuth Redirect URL</label><div class="hint">Register this exact URL in your Twitch app</div></div><input type="text" id="set-redirect" value="${esc(r)}" style="width:240px"/></div>
+        <div class="setting-row"><div><label>Enable raid starting</label><div class="hint">Needs the channel:manage:raids scope. If off, only quick links are shown.</div></div><label class="switch"><input type="checkbox" id="set-raids" ${settings.raidsEnabled ? "checked" : ""}/><span class="slider"></span></label></div>
         <h3>Refresh</h3>
         <div class="setting-row"><label>Refresh live data every (seconds)</label><input type="number" id="set-refresh" min="20" max="600" value="${settings.refreshSeconds}"/></div>
         <div class="setting-row"><label>Rebuild Discover every N refreshes</label><input type="number" id="set-sugg" min="1" max="20" value="${settings.refreshSuggestionsEvery}"/></div>
@@ -767,17 +723,11 @@
         <div class="setting-row"><label>Size lower (×)</label><input type="number" id="set-lower" min="0" step="0.05" value="${settings.sizeLower}"/></div>
         <div class="setting-row"><label>Size upper (×)</label><input type="number" id="set-upper" min="0" step="0.5" value="${settings.sizeUpper}"/></div>
         <h3>Appearance</h3>
-        <div class="setting-row">
-          <div><label>Compact mode</label><div class="hint">Better for very narrow docks</div></div>
-          <label class="switch"><input type="checkbox" id="set-compact" ${settings.compact ? "checked" : ""}/><span class="slider"></span></label>
-        </div>
+        <div class="setting-row"><div><label>Compact mode</label><div class="hint">Better for very narrow docks</div></div><label class="switch"><input type="checkbox" id="set-compact" ${settings.compact ? "checked" : ""}/><span class="slider"></span></label></div>
         <h3>Tracked categories</h3>
         <div>${catRows || '<span class="hint" style="font-size:11px;color:var(--text-faint)">None yet — add them in the Discover tab.</span>'}</div>
       </div>
-      <div class="foot">
-        <button class="btn" data-action="logout">Disconnect</button>
-        <button class="btn raid" data-action="save-settings">Save</button>
-      </div>
+      <div class="foot"><button class="btn" data-action="logout">Disconnect</button><button class="btn raid" data-action="save-settings">Save</button></div>
     `);
     if (forceClientId) {
       const inp = $("#set-client");
@@ -830,14 +780,8 @@
   function confirmRaid(login, uid) {
     openModal(`
       <header>Start a raid? <button class="x" data-action="close-modal">×</button></header>
-      <div class="body">
-        <p style="color:var(--text-dim);font-size:13px;line-height:1.5">This sends your <b>${fmt(S.meViewers)}</b> viewers to <b>${esc(login)}</b>. Twitch starts a 90-second countdown; you (or the timer) confirm the raid on Twitch's side.</p>
-        <p class="hint" style="font-size:11px;color:var(--text-faint)">Rate limit: 10 raids per 10 minutes.</p>
-      </div>
-      <div class="foot">
-        <button class="btn" data-action="close-modal">Cancel</button>
-        <button class="btn raid" id="confirm-raid-btn" data-uid="${esc(uid)}" data-login="${esc(login)}">${ICON.bolt} Raid ${esc(login)}</button>
-      </div>
+      <div class="body"><p style="color:var(--text-dim);font-size:13px;line-height:1.5">This sends your <b>${fmt(S.meViewers)}</b> viewers to <b>${esc(login)}</b>. Twitch starts a 90-second countdown; you (or the timer) confirm the raid on Twitch's side.</p><p class="hint" style="font-size:11px;color:var(--text-faint)">Rate limit: 10 raids per 10 minutes.</p></div>
+      <div class="foot"><button class="btn" data-action="close-modal">Cancel</button><button class="btn raid" id="confirm-raid-btn" data-uid="${esc(uid)}" data-login="${esc(login)}">${ICON.bolt} Raid ${esc(login)}</button></div>
     `);
     $("#confirm-raid-btn").addEventListener("click", async () => {
       closeModal();
@@ -926,11 +870,12 @@
       case "pick-cat": {
         const gid = btn.dataset.id;
         const name = btn.dataset.name;
+        const boxart = btn.dataset.box || "";
         const inp = document.getElementById("cat-input");
         if (inp) inp.value = "";
         const box = document.getElementById("cat-suggest");
         if (box) box.innerHTML = "";
-        await trackGame(S.demo ? { id: "demo-" + name, name } : { id: gid, name });
+        await trackGame(S.demo ? { id: "demo-" + name, name } : { id: gid, name, box_art_url: boxart });
         break;
       }
       case "view-cat": {
@@ -955,24 +900,39 @@
         renderTabs();
         break;
       }
-      case "other-cat": {
+      case "filter-cat": {
         const gid = btn.dataset.id;
         const name = btn.dataset.name;
-        if (S.openOther[gid]) {
-          delete S.openOther[gid];
-          renderTabs();
-          break;
+        S.filterGame = { id: gid, name };
+        S.filterStreams = null;
+        if (!S.demo) {
+          try {
+            S.filterStreams = await getStreamsByGame(gid, 100);
+          } catch (err) {
+            S.filterStreams = [];
+            toast(err.message, "err");
+          }
+        } else {
+          S.filterStreams = S.sameGameStreams && gid === S.myGameId ? S.sameGameStreams : [];
         }
-        S.openOther[gid] = { name, loading: true, streams: [] };
+        S.activeTab = "discover";
         renderTabs();
-        try {
-          const streams = await getStreamsByGame(gid, 60);
-          S.openOther[gid] = { name, loading: false, streams };
-        } catch (err) {
-          S.openOther[gid] = { name, loading: false, streams: [] };
-          toast(err.message, "err");
-        }
-        renderTabs();
+        break;
+      }
+      case "clear-filter":
+        S.filterGame = null;
+        S.filterStreams = null;
+        selectTab("discover");
+        break;
+      case "lang-all":
+        S.langHide.clear();
+        selectTab("discover");
+        break;
+      case "lang-toggle": {
+        const l = btn.dataset.lang;
+        if (S.langHide.has(l)) S.langHide.delete(l);
+        else S.langHide.add(l);
+        selectTab("discover");
         break;
       }
       case "remove-cat": {
@@ -1005,11 +965,10 @@
       toast("Already tracking " + game.name, "warn");
       return;
     }
-    settings.categories.push({ id: game.id, name: game.name });
+    settings.categories.push({ id: game.id, name: game.name, box_art_url: game.box_art_url || "" });
     saveSettings();
     toast("Tracking " + game.name + " — showing everyone live in it", "ok");
     await buildDiscover();
-    // Auto-open the category's live view so you immediately see everyone in it.
     S.viewOpen.add(game.id);
     if (!S.demo) {
       try {
@@ -1066,7 +1025,7 @@
         box.innerHTML = games
           .map(
             (g) =>
-              `<div class="suggest-item" data-action="pick-cat" data-id="${esc(g.id)}" data-name="${esc(g.name)}">${
+              `<div class="suggest-item" data-action="pick-cat" data-id="${esc(g.id)}" data-name="${esc(g.name)}" data-box="${esc(g.box_art_url || "")}">${
                 g.box_art_url ? `<img src="${thumbUrl(g.box_art_url, 40, 56)}" alt=""/>` : ""
               }<span>${esc(g.name)}</span></div>`
           )
