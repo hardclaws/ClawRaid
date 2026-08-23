@@ -29,7 +29,7 @@
   // users. With this set, visitors just click "Log in with Twitch" — no dev
   // console required. (The Client ID is public by design; it's sent in every
   // Twitch API request.) Leave blank to let each user supply their own.
-  const EMBEDDED_CLIENT_ID = "";
+  const EMBEDDED_CLIENT_ID = "t0bhs24dpvhywo3mhzw88rcrjhrtfm";
 
   const STORE = {
     clientId: "rd_client_id",
