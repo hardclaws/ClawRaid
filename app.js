@@ -351,8 +351,7 @@
   }
   function login() {
     if (!S.clientId) {
-      openSettings(true);
-      toast("Enter your Twitch Client ID first.", "warn");
+      toast("Owner: set EMBEDDED_CLIENT_ID in app.js (or config.js) to enable login.", "warn");
       return;
     }
     location.href = buildAuthUrl();
@@ -729,9 +728,9 @@
         ${
           hasId
             ? `<p class="hint" style="font-size:12px;color:var(--text-dim)">Log in with your Twitch account to load your live follows, categories, and raid targets.</p>`
-            : `<div class="field"><label>Twitch Client ID</label><input type="text" id="setup-client" placeholder="Paste the Client ID from your Twitch app" value="${esc(S.clientId)}" /><div class="hint" style="font-size:11px;color:var(--text-faint);margin-top:6px">Register a free app at <code>dev.twitch.tv/console/apps</code>. Set the OAuth Redirect URL to exactly:<br/><code id="setup-redirect">${esc(redirectUri())}</code></div></div>`
+            : `<div class="hint" style="font-size:12px;color:var(--text-faint)">This app isn't configured yet. The owner must set <code>EMBEDDED_CLIENT_ID</code> in <code>app.js</code> (or <code>config.js</code>) to enable login.</div>`
         }
-        <button class="connect" data-action="connect">${hasId ? "Log in with Twitch" : "Connect with Twitch"}</button>
+        <button class="connect" data-action="connect">${hasId ? "Log in with Twitch" : "Not configured"}</button>
         <button class="demo" data-action="demo">View demo with sample data</button>
       </div>`;
     $("#topbar").innerHTML = `<div class="brand"><span class="logo">${ICON.twitch}</span><span class="txt">Clawraid</span></div>`;
@@ -798,12 +797,7 @@
       <header>Settings <button class="x" data-action="close-modal">×</button></header>
       <div class="body">
         <h3>Twitch connection</h3>
-        ${
-          EMBEDDED_CLIENT_ID
-            ? `<div class="hint" style="font-size:11px;color:var(--text-faint);margin-bottom:8px">Client ID &amp; Redirect URL are managed by the owner (embedded), so they're hidden here to prevent accidental changes.</div>`
-            : `<div class="setting-row"><div><label>Client ID</label><div class="hint">From dev.twitch.tv/console/apps</div></div><input type="text" id="set-client" value="${esc(S.clientId)}" style="width:200px"/></div>
-        <div class="setting-row"><div><label>OAuth Redirect URL</label><div class="hint">Register this exact URL in your Twitch app</div></div><input type="text" id="set-redirect" value="${esc(r)}" style="width:240px"/></div>`
-        }
+        <div class="hint" style="font-size:11px;color:var(--text-faint);margin-bottom:8px">Client ID &amp; Redirect URL are configured in the app code (set <code>EMBEDDED_CLIENT_ID</code> in app.js or config.js), so they're hidden here and can't be overwritten.</div>
         <div class="setting-row"><div><label>Enable raid starting</label><div class="hint">Needs the channel:manage:raids scope. If off, only quick links are shown.</div></div><label class="switch"><input type="checkbox" id="set-raids" ${settings.raidsEnabled ? "checked" : ""}/><span class="slider"></span></label></div>
         <h3>Card thumbnail</h3>
         <div class="setting-row">
