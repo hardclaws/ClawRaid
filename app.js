@@ -46,6 +46,9 @@
     categories: [],
     compact: true,
     discoverFirst: 30,
+    langAllow: [], // empty = show all languages; else only these
+    cardThumb: "live", // "live" (stream preview) or "avatar" (profile picture)
+    autoReconnect: true,
   };
 
   const S = {
@@ -260,6 +263,40 @@
     const d = await api("/games", { params: { id } });
     return (d.data && d.data[0]) || null;
   }
+  async function fetchUsers(ids) {
+    if (!ids.length) return [];
+    const url = new URL(API + "/users");
+    ids.forEach((id) => url.searchParams.append("id", id));
+    const res = await fetch(url.toString(), { headers: { Authorization: "Bearer " + S.token, "Client-Id": S.clientId } });
+    if (!res.ok) throw new Error("users " + res.status);
+    return (await res.json()).data || [];
+  }
+  // Attach profile_image_url onto streams so cards can show avatars.
+  async function attachProfiles(streams) {
+    if (!streams || !streams.length || S.demo) return;
+    const ids = Array.from(new Set(streams.map((s) => s.user_id).filter(Boolean)));
+    if (!ids.length) return;
+    const all = [];
+    for (let i = 0; i < ids.length; i += 100) {
+      try {
+        all.push.apply(all, await fetchUsers(ids.slice(i, i + 100)));
+      } catch (e) {}
+    }
+    const map = {};
+    all.forEach((u) => (map[u.id] = u.profile_image_url));
+    streams.forEach((s) => {
+      if (map[s.user_id]) s.profile_image_url = map[s.user_id];
+    });
+  }
+  async function attachAllProfiles() {
+    const all = []
+      .concat(S.followedStreams || [])
+      .concat(S.sameGameStreams || [])
+      .concat(S.discoverStreams || [])
+      .concat(S.filterStreams || [])
+      .concat(...Object.values(S.viewCache || {}));
+    await attachProfiles(all);
+  }
   async function startRaid(toId) {
     return api("/raids", { method: "POST", params: { from_broadcaster_id: S.user.id, to_broadcaster_id: toId } });
   }
@@ -361,13 +398,20 @@
 
       buildDerivedCategories();
       if (force || S.cycle % settings.refreshSuggestionsEvery === 0 || !S.discoverStreams.length) await buildDiscover();
+      try { await attachAllProfiles(); } catch (e) {}
 
       renderHeader();
       renderTabs();
     } catch (e) {
       if (e.message === "unauthorized") {
-        renderLogin();
-        toast("Session expired — please reconnect.", "warn");
+        if (settings.autoReconnect && !S.reauth) {
+          S.reauth = true;
+          toast("Session expired — reconnecting…", "warn");
+          login();
+        } else {
+          renderExpired();
+          toast("Session expired — please reconnect.", "warn");
+        }
       } else {
         toast(e.message || "Something went wrong", "err");
       }
@@ -446,7 +490,9 @@
     return Array.from(set).sort();
   }
   function applyLang(list) {
-    return (list || []).filter((s) => !s.language || !S.langHide.has(s.language));
+    const allow = new Set(settings.langAllow || []);
+    if (allow.size === 0) return list || [];
+    return (list || []).filter((s) => !s.language || allow.has(s.language));
   }
   function sortControl() {
     const opts = [
@@ -460,11 +506,12 @@
       .join("")}</select></div>`;
   }
   function langFilterChips(langs) {
-    const allOn = S.langHide.size === 0;
-    return `<div class="langfilter"><span class="lf-label">Languages:</span>
+    const allow = new Set(settings.langAllow || []);
+    const allOn = allow.size === 0;
+    return `<div class="langfilter"><span class="lf-label">Show:</span>
       <button class="langchip ${allOn ? "on" : ""}" data-action="lang-all">All</button>
       ${langs
-        .map((l) => `<button class="langchip ${S.langHide.has(l) ? "off" : "on"}" data-action="lang-toggle" data-lang="${esc(l)}">${esc(l)}</button>`)
+        .map((l) => `<button class="langchip ${allOn || allow.has(l) ? "on" : "off"}" data-action="lang-toggle" data-lang="${esc(l)}">${esc(l)}</button>`)
         .join("")}</div>`;
   }
   function sectionHead(title, sub) {
@@ -473,9 +520,14 @@
 
   function streamCard(s, opts) {
     opts = opts || {};
-    const thumb = s.thumbnail_url
-      ? thumbUrl(s.thumbnail_url, 320, 180)
-      : placeholder(s.user_login || s.user_name, 320, 180, (s.user_name || "?").slice(0, 2));
+    let thumb;
+    if (settings.cardThumb === "avatar" && s.profile_image_url) {
+      thumb = s.profile_image_url;
+    } else if (s.thumbnail_url) {
+      thumb = thumbUrl(s.thumbnail_url, 320, 180);
+    } else {
+      thumb = placeholder(s.user_login || s.user_name, 320, 180, (s.user_name || "?").slice(0, 2));
+    }
     const isFollowed = S.followedIds && S.followedIds.has(s.user_id);
     const tags = (s.tags || []).slice(0, 4).map((t) => `<span class="tag">${esc(t)}</span>`).join("");
     const raidBtn = settings.raidsEnabled
@@ -651,6 +703,17 @@
       ${S.discoverFirst < 100 && (S.discoverStreams || []).length ? `<button class="btn" data-action="discover-more" style="margin-top:8px">Load More</button>` : ""}`;
   }
 
+  function renderExpired() {
+    const c = $("#content");
+    c.innerHTML = `
+      <div class="setup">
+        <h1>${ICON.twitch} Clawraid</h1>
+        <p>Your Twitch session expired. Reconnect to keep raiding.</p>
+        <button class="connect" data-action="connect">Reconnect with Twitch</button>
+      </div>`;
+    $("#topbar").innerHTML = `<div class="brand"><span class="logo">${ICON.twitch}</span><span class="txt">Clawraid</span></div>`;
+  }
+
   function renderLogin() {
     const c = $("#content");
     const hasId = !!S.clientId && !S.demo;
@@ -735,9 +798,23 @@
       <header>Settings <button class="x" data-action="close-modal">×</button></header>
       <div class="body">
         <h3>Twitch connection</h3>
-        <div class="setting-row"><div><label>Client ID</label><div class="hint">From dev.twitch.tv/console/apps</div></div><input type="text" id="set-client" value="${esc(S.clientId)}" style="width:200px"/></div>
-        <div class="setting-row"><div><label>OAuth Redirect URL</label><div class="hint">Register this exact URL in your Twitch app</div></div><input type="text" id="set-redirect" value="${esc(r)}" style="width:240px"/></div>
+        ${
+          EMBEDDED_CLIENT_ID
+            ? `<div class="hint" style="font-size:11px;color:var(--text-faint);margin-bottom:8px">Client ID &amp; Redirect URL are managed by the owner (embedded), so they're hidden here to prevent accidental changes.</div>`
+            : `<div class="setting-row"><div><label>Client ID</label><div class="hint">From dev.twitch.tv/console/apps</div></div><input type="text" id="set-client" value="${esc(S.clientId)}" style="width:200px"/></div>
+        <div class="setting-row"><div><label>OAuth Redirect URL</label><div class="hint">Register this exact URL in your Twitch app</div></div><input type="text" id="set-redirect" value="${esc(r)}" style="width:240px"/></div>`
+        }
         <div class="setting-row"><div><label>Enable raid starting</label><div class="hint">Needs the channel:manage:raids scope. If off, only quick links are shown.</div></div><label class="switch"><input type="checkbox" id="set-raids" ${settings.raidsEnabled ? "checked" : ""}/><span class="slider"></span></label></div>
+        <h3>Card thumbnail</h3>
+        <div class="setting-row">
+          <div><label>Show on each card</label><div class="hint">Live stream preview, or the channel's profile picture.</div></div>
+          <select id="set-thumb">${["live", "avatar"].map((v) => `<option value="${v}" ${settings.cardThumb === v ? "selected" : ""}>${v === "live" ? "Live preview" : "Profile picture"}</option>`).join("")}</select>
+        </div>
+        <h3>Behavior</h3>
+        <div class="setting-row">
+          <div><label>Auto-reconnect on expiry</label><div class="hint">Silently re-authenticate when the Twitch token expires, so the dock stays live.</div></div>
+          <label class="switch"><input type="checkbox" id="set-reauth" ${settings.autoReconnect ? "checked" : ""}/><span class="slider"></span></label>
+        </div>
         <h3>Refresh</h3>
         <div class="setting-row"><label>Refresh live data every (seconds)</label><input type="number" id="set-refresh" min="20" max="600" value="${settings.refreshSeconds}"/></div>
         <div class="setting-row"><label>Rebuild Discover every N refreshes</label><input type="number" id="set-sugg" min="1" max="20" value="${settings.refreshSuggestionsEvery}"/></div>
@@ -761,9 +838,13 @@
   }
 
   async function saveSettingsFromModal() {
-    const cid = $("#set-client").value.trim();
-    const red = $("#set-redirect").value.trim();
-    settings.raidsEnabled = $("#set-raids").checked;
+    const cidInp = $("#set-client");
+    const cid = cidInp ? cidInp.value.trim() : "";
+    const redInp = $("#set-redirect");
+    const red = redInp ? redInp.value.trim() : "";
+    settings.raidsEnabled = $("#set-raids") ? $("#set-raids").checked : settings.raidsEnabled;
+    settings.cardThumb = ($("#set-thumb") || {}).value || "live";
+    settings.autoReconnect = $("#set-reauth") ? $("#set-reauth").checked : true;
     settings.refreshSeconds = clampInt($("#set-refresh").value, 20, 600, 60);
     settings.refreshSuggestionsEvery = clampInt($("#set-sugg").value, 1, 20, 2);
     settings.minViewers = Math.max(0, parseInt($("#set-minv").value, 10) || 0);
@@ -871,6 +952,12 @@
         break;
       case "follow": {
         btn.disabled = true;
+        if (S.demo) {
+          toast("Now following " + btn.dataset.login + " (demo)", "ok");
+          if (S.followedIds) S.followedIds.add(btn.dataset.uid);
+          btn.outerHTML = `<button class="btn follow followed" disabled>${ICON.heart} Following</button>`;
+          break;
+        }
         try {
           await followUser(btn.dataset.uid);
           toast("Now following " + btn.dataset.login, "ok");
@@ -915,6 +1002,7 @@
             renderTabs();
             try {
               S.viewCache[gid] = await getStreamsByGame(gid, 60);
+              await attachProfiles(S.viewCache[gid]);
             } catch (err) {
               S.viewCache[gid] = [];
               toast(err.message || "Couldn't load category", "err");
@@ -933,6 +1021,7 @@
         if (!S.demo) {
           try {
             S.filterStreams = await getStreamsByGame(gid, 100);
+            await attachProfiles(S.filterStreams);
           } catch (err) {
             S.filterStreams = [];
             toast(err.message, "err");
@@ -950,13 +1039,17 @@
         selectTab("discover");
         break;
       case "lang-all":
-        S.langHide.clear();
+        settings.langAllow = [];
+        saveSettings();
         selectTab("discover");
         break;
       case "lang-toggle": {
         const l = btn.dataset.lang;
-        if (S.langHide.has(l)) S.langHide.delete(l);
-        else S.langHide.add(l);
+        const allow = new Set(settings.langAllow || []);
+        if (allow.has(l)) allow.delete(l);
+        else allow.add(l);
+        settings.langAllow = Array.from(allow);
+        saveSettings();
         selectTab("discover");
         break;
       }
