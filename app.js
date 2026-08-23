@@ -44,7 +44,7 @@
     maxViewers: 5000,
     minViewers: 0,
     categories: [],
-    compact: false,
+    compact: true,
     discoverFirst: 30,
   };
 
@@ -255,6 +255,10 @@
   async function getStreamsByGame(gameId, first) {
     const d = await api("/streams", { params: { game_id: gameId, first: first || 30 } });
     return d.data || [];
+  }
+  async function getGame(id) {
+    const d = await api("/games", { params: { id } });
+    return (d.data && d.data[0]) || null;
   }
   async function startRaid(toId) {
     return api("/raids", { method: "POST", params: { from_broadcaster_id: S.user.id, to_broadcaster_id: toId } });
@@ -566,13 +570,34 @@
       (list.length ? list.map((s) => streamCard(s, { catLink: true })).join("") : emptyState("None of the channels you follow are live right now."));
   }
 
+  // Lazy-load box art for tracked categories that were saved before art was
+  // stored (e.g. older localStorage entries). Silently fills in thumbnails.
+  function ensureCategoryArt() {
+    settings.categories.forEach((c) => {
+      if (!c.box_art_url && !c._artPending) {
+        c._artPending = true;
+        getGame(c.id)
+          .then((g) => {
+            if (g && g.box_art_url) {
+              c.box_art_url = g.box_art_url;
+              saveSettings();
+              if (S.activeTab === "discover") renderTabs();
+            }
+          })
+          .catch(() => {});
+      }
+    });
+  }
+
   function renderDiscover(tc, match) {
+    ensureCategoryArt();
     // Filtered view: everyone live in a specific category.
     if (S.filterGame) {
       const streams = applyLang(sortStreams(S.filterStreams || []).filter(match));
       const langs = langSet(S.filterStreams || []);
+      const fthumb = S.filterGame.box_art_url ? `<img class="catthumb" src="${thumbUrl(S.filterGame.box_art_url, 40, 56)}" alt=""/>` : "";
       tc.innerHTML =
-        sectionHead("Discover", `Everyone live in <b>${esc(S.filterGame.name)}</b>`) +
+        `<div class="sechead"><div style="display:flex;align-items:center;gap:8px"><h2>Discover</h2>${fthumb}<span>${esc(S.filterGame.name)}</span></div></div>` +
         `<button class="btn" data-action="clear-filter" style="margin:0 0 8px">✕ Clear filter</button>` +
         sortControl() +
         langFilterChips(langs) +

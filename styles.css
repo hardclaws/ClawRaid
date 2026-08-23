@@ -300,10 +300,56 @@ html, body {
   padding: 8px 12px; border-radius: 8px; font-size: 12px; margin-bottom: 10px;
 }
 
-/* ---------- Compact mode (narrow OBS docks) ---------- */
-.app.compact .card { grid-template-columns: 1fr; }
-.app.compact .card .thumb { width: 100%; height: 90px; }
+/* ---------- Compact / dock mode (narrow OBS docks) ---------- */
+.app.compact { font-size: 12px; }
+.app.compact .topbar { padding: 5px 8px; gap: 6px; }
 .app.compact .topbar .brand span.txt { display: none; }
+.app.compact .topbar .me { font-size: 11px; gap: 5px; margin-left: auto; }
+.app.compact .topbar .me img { width: 20px; height: 20px; }
+.app.compact .topbar .iconbtn { padding: 4px 6px; }
+
+.app.compact .content { padding: 8px; }
+.app.compact .tabs { margin-bottom: 6px; gap: 4px; }
+.app.compact .tab { padding: 5px 4px; font-size: 10px; }
+.app.compact .tab .count { font-size: 9px; padding: 0 5px; min-width: 14px; }
+.app.compact .searchrow { margin-bottom: 6px; }
+.app.compact .searchrow input { padding: 6px 8px 6px 28px; font-size: 12px; }
+.app.compact .sechead { margin: 2px 0 6px; }
+.app.compact .sechead h2 { font-size: 11px; }
+.app.compact .sechead-sub { font-size: 10px; }
+.app.compact .subhead { margin: 8px 0 4px; font-size: 10px; }
+.app.compact .sortrow { margin-bottom: 6px; }
+.app.compact .sortrow label { font-size: 10px; }
+.app.compact .sortsel { padding: 3px 6px; font-size: 11px; }
+.app.compact .langfilter { margin-bottom: 6px; gap: 4px; }
+.app.compact .lf-label { font-size: 10px; }
+.app.compact .langchip { padding: 2px 7px; font-size: 10px; }
+
+/* compact card = tight horizontal channel row with live thumbnail */
+.app.compact .card {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px; margin-bottom: 5px; border-radius: 6px;
+}
+.app.compact .card .thumb { width: 60px; height: 34px; border-radius: 4px; flex: 0 0 auto; }
+.app.compact .card .body { flex: 1; min-width: 0; gap: 1px; }
+.app.compact .card .title {
+  font-size: 11px; font-weight: 600; line-height: 1.2;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: block; -webkit-line-clamp: 1; -webkit-box-orient: horizontal;
+}
+.app.compact .card .name { font-size: 11px; }
+.app.compact .card .meta { font-size: 10px; }
+.app.compact .card .tags { display: none; }
+.app.compact .card .actions { margin-top: 2px; gap: 4px; flex-wrap: wrap; }
+.app.compact .btn { padding: 3px 6px; font-size: 10px; border-radius: 5px; gap: 3px; }
+.app.compact .btn svg { width: 11px; height: 11px; }
+
+.app.compact .chip { padding: 5px 8px; gap: 6px; }
+.app.compact .chip .cname { font-size: 11px; }
+.app.compact .chip .cbtn { padding: 3px 6px; font-size: 10px; }
+.app.compact .catthumb { width: 26px; height: 36px; }
+.app.compact .discovery .card { display: flex; }
+.app.compact .suggest-item { padding: 5px 8px; font-size: 12px; }
 
 ::-webkit-scrollbar { width: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--bg-hover); border-radius: 6px; }
