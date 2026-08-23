@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Clawraid — Twitch raid dock for OBS</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app" class="app">
+    <header id="topbar" class="topbar"></header>
+    <main id="content" class="content"></main>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="toast-root" class="toast-root"></div>
+
+  <!-- Optional: a self-hoster can drop a Client ID here so users don't have to paste one.
+       Copy config.example.js to config.js and fill it in. Leave blank for per-user setup. -->
+  <script src="config.example.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
