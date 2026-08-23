@@ -32,6 +32,10 @@ Twitch token lives only in your browser’s `localStorage`.
 - 🧭 **Three-tab layout** — Same Game / Other Categories / Discover, with a
   search box to quickly find any channel.
 - 🎯 **Smart Discover** — not-yet-followed channels in your niche, sized to your
+  viewer count; track extra categories and Load More.
+- 🔎 **Category autocomplete** — type to search Twitch categories and pick the
+  exact match (no typos / "couldn't find" errors); **View** a tracked category's
+  live streams on demand.
   viewer count (configurable band + viewer ceiling); track extra categories and
   Load More.
 - 🔄 **Auto-refresh** on a timer; token expiry is detected and you’re prompted

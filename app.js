@@ -60,6 +60,8 @@
     derivedCategories: [], // [{ id, name, streams: [...] }]
     discoverStreams: [], // not-followed live channels in your categories
     discoverFirst: 30,
+    viewOpen: new Set(), // tracked-category ids whose live streams are expanded
+    viewCache: {}, // gameId -> streams (all) for the expanded view
     activeTab: null,
     searchTerm: "",
     demo: false,
@@ -534,9 +536,6 @@
   }
 
   function renderDiscover(tc, q) {
-    const catRows = settings.categories
-      .map((c) => `<span class="tag">${esc(c.name)} <a data-action="remove-cat" data-name="${esc(c.name)}" style="cursor:pointer;color:var(--red)">✕</a></span>`)
-      .join(" ");
     const list = (S.discoverStreams || []).filter(
       (s) => !q || (s.user_name || "").toLowerCase().includes(q) || (s.title || "").toLowerCase().includes(q)
     );
@@ -545,13 +544,31 @@
       : `Live channels in your tracked/derived categories you don't follow yet.` +
         (S.meViewers > 0 ? ` Sized near your ${fmt(S.meViewers)} viewers.` : "");
 
+    const catManage = settings.categories
+      .map((c) => {
+        const open = S.viewOpen.has(c.id);
+        const streams = open ? S.viewCache[c.id] || [] : null;
+        return `
+        <div class="catmanage">
+          <div class="chip">
+            <div><div class="cname">${esc(c.name)}</div><div class="cmeta">${streams ? streams.length + " live" : "tracked"}</div></div>
+            <button class="btn cbtn" data-action="view-cat" data-id="${esc(c.id)}" data-name="${esc(c.name)}">${open ? "Hide" : "View"}</button>
+            <button class="btn cbtn" data-action="remove-cat" data-name="${esc(c.name)}" title="Remove">${ICON.close}</button>
+          </div>
+          ${open ? `<div class="discovery">${streams.length ? streams.map(streamCard).join("") : emptyState("No live streams in " + esc(c.name) + " right now.")}</div>` : ""}
+        </div>`;
+      })
+      .join("");
+
     tc.innerHTML = `
       <div class="cat-add">
-        <input type="text" id="cat-input" placeholder="Add a category to discover (e.g. Just Chatting)" />
+        <input type="text" id="cat-input" placeholder="Search a category to track (e.g. Just Chatting)" autocomplete="off" />
         <button class="btn raid" data-action="add-cat">+ Track</button>
       </div>
+      <div id="cat-suggest" class="suggest"></div>
       <div class="hint" style="font-size:11px;color:var(--text-faint);margin:2px 0 8px">${hint}</div>
-      ${settings.categories.length ? `<div class="chips" style="margin-bottom:8px">${catRows}</div>` : ""}
+      ${settings.categories.length ? `<div class="cats">${catManage}</div>` : `<div class="hint" style="font-size:11px;color:var(--text-faint);margin-bottom:8px">No categories tracked yet — search above and pick a match, or type a name and hit + Track.</div>`}
+      <h3 style="font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--text-faint);margin:12px 0 6px">Not-yet-followed (Discover)</h3>
       ${list.length ? list.map(streamCard).join("") : emptyState("No discoveries right now. Track more categories or widen the size filter in Settings.")}
       ${S.discoverFirst < 100 && (S.discoverStreams || []).length ? `<button class="btn" data-action="discover-more" style="margin-top:8px">Load More</button>` : ""}
     `;
@@ -848,14 +865,50 @@
         if (!name) break;
         await addCategory(name);
         if (inp) inp.value = "";
+        const box = document.getElementById("cat-suggest");
+        if (box) box.innerHTML = "";
+        break;
+      }
+      case "pick-cat": {
+        const gid = btn.dataset.id;
+        const name = btn.dataset.name;
+        const inp = document.getElementById("cat-input");
+        if (inp) inp.value = "";
+        const box = document.getElementById("cat-suggest");
+        if (box) box.innerHTML = "";
+        await trackGame(S.demo ? { id: "demo-" + name, name } : { id: gid, name });
+        break;
+      }
+      case "view-cat": {
+        const gid = btn.dataset.id;
+        const name = btn.dataset.name;
+        if (S.viewOpen.has(gid)) {
+          S.viewOpen.delete(gid);
+        } else {
+          S.viewOpen.add(gid);
+          if (!S.viewCache[gid]) {
+            try {
+              S.viewCache[gid] = await getStreamsByGame(gid, 30);
+            } catch (err) {
+              S.viewCache[gid] = [];
+              toast(err.message || "Couldn't load category", "err");
+            }
+          }
+        }
+        renderTabs();
         break;
       }
       case "remove-cat": {
         const name = btn.dataset.name;
         settings.categories = settings.categories.filter((c) => c.name !== name);
+        delete S.viewCache[name];
         saveSettings();
-        if (S.activeTab === "discover") renderTabs();
-        else if ($("#modal-root").innerHTML) openSettings(false);
+        if (S.activeTab === "discover") {
+          await buildDiscover();
+          renderTabs();
+        } else if ($("#modal-root").innerHTML) {
+          openSettings(false);
+        }
         break;
       }
       case "discover-more": {
@@ -869,20 +922,26 @@
     }
   }
 
+  async function trackGame(game) {
+    if (!game) return;
+    if (settings.categories.some((c) => c.id === game.id || c.name.toLowerCase() === game.name.toLowerCase())) {
+      toast("Already tracking " + game.name, "warn");
+      return;
+    }
+    settings.categories.push({ id: game.id, name: game.name });
+    saveSettings();
+    toast("Tracking " + game.name, "ok");
+    await buildDiscover();
+    renderTabs();
+  }
+
   async function addCategory(name) {
     if (!S.clientId && !S.demo) {
       toast("Connect Twitch first.", "warn");
       return;
     }
-    if (settings.categories.some((c) => c.name.toLowerCase() === name.toLowerCase())) {
-      toast("Already tracking " + name, "warn");
-      return;
-    }
     if (S.demo) {
-      settings.categories.push({ id: "demo-" + name, name });
-      saveSettings();
-      renderTabs();
-      toast("Tracking " + name + " (demo)", "ok");
+      await trackGame({ id: "demo-" + name, name });
       return;
     }
     try {
@@ -891,13 +950,43 @@
         toast("Couldn't find a category named '" + name + "'", "err");
         return;
       }
-      settings.categories.push({ id: g.id, name: g.name });
-      saveSettings();
-      renderTabs();
-      toast("Tracking " + g.name, "ok");
+      await trackGame(g);
     } catch (e) {
       toast(e.message, "err");
     }
+  }
+
+  let catTypeTimer = null;
+  function onCatType(q) {
+    if (S.demo) return;
+    const box = document.getElementById("cat-suggest");
+    if (!box) return;
+    q = (q || "").trim();
+    if (q.length < 2) {
+      box.innerHTML = "";
+      return;
+    }
+    clearTimeout(catTypeTimer);
+    catTypeTimer = setTimeout(async () => {
+      try {
+        const data = await api("/search/categories", { params: { query: q, first: 8 } });
+        const games = data.data || [];
+        if (!games.length) {
+          box.innerHTML = `<div class="suggest-item dim">No matches</div>`;
+          return;
+        }
+        box.innerHTML = games
+          .map(
+            (g) =>
+              `<div class="suggest-item" data-action="pick-cat" data-id="${esc(g.id)}" data-name="${esc(g.name)}">${
+                g.box_art_url ? `<img src="${thumbUrl(g.box_art_url, 40, 56)}" alt=""/>` : ""
+              }<span>${esc(g.name)}</span></div>`
+          )
+          .join("");
+      } catch (e) {
+        box.innerHTML = "";
+      }
+    }, 250);
   }
 
   /* ------------------------------ Timer --------------------------------- */
@@ -922,9 +1011,12 @@
 
     document.addEventListener("click", onAction);
     document.addEventListener("input", (e) => {
-      if (e.target && e.target.id === "search") {
+      if (!e.target) return;
+      if (e.target.id === "search") {
         S.searchTerm = e.target.value;
         selectTab(S.activeTab || "discover");
+      } else if (e.target.id === "cat-input") {
+        onCatType(e.target.value);
       }
     });
     document.addEventListener("keydown", (e) => {
