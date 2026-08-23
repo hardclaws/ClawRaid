@@ -25,6 +25,12 @@
   const BASE_SCOPES = ["user:read:follows", "user:edit:follows"];
   const RAID_SCOPE = "channel:manage:raids";
 
+  // Owner: paste your Twitch Client ID here to enable ZERO-SETUP login for your
+  // users. With this set, visitors just click "Log in with Twitch" — no dev
+  // console required. (The Client ID is public by design; it's sent in every
+  // Twitch API request.) Leave blank to let each user supply their own.
+  const EMBEDDED_CLIENT_ID = "";
+
   const STORE = {
     clientId: "rd_client_id",
     redirect: "rd_redirect",
@@ -576,6 +582,7 @@
 
   function renderLogin() {
     const c = $("#content");
+    const hasId = !!S.clientId && !S.demo;
     c.innerHTML = `
       <div class="setup">
         <h1>${ICON.twitch} Clawraid ${S.demo ? `<span class="demo-badge">DEMO</span>` : ""}</h1>
@@ -585,15 +592,19 @@
             ? `<div class="banner">Demo mode uses fake data so you can preview the layout. Connect a real Twitch account to use it for real.</div>`
             : ""
         }
-        <div class="field">
-          <label>Twitch Client ID</label>
-          <input type="text" id="setup-client" placeholder="Paste the Client ID from your Twitch app" value="${esc(S.clientId)}" />
-          <div class="hint" style="font-size:11px;color:var(--text-faint);margin-top:6px">
-            Register a free app at <code>dev.twitch.tv/console/apps</code>. Set the OAuth Redirect URL to exactly:<br/>
-            <code id="setup-redirect">${esc(redirectUri())}</code>
-          </div>
-        </div>
-        <button class="connect" data-action="connect">Connect with Twitch</button>
+        ${
+          hasId
+            ? `<p class="hint" style="font-size:12px;color:var(--text-dim)">Log in with your Twitch account to load your live follows, categories, and raid targets.</p>`
+            : `<div class="field">
+                <label>Twitch Client ID</label>
+                <input type="text" id="setup-client" placeholder="Paste the Client ID from your Twitch app" value="${esc(S.clientId)}" />
+                <div class="hint" style="font-size:11px;color:var(--text-faint);margin-top:6px">
+                  Register a free app at <code>dev.twitch.tv/console/apps</code>. Set the OAuth Redirect URL to exactly:<br/>
+                  <code id="setup-redirect">${esc(redirectUri())}</code>
+                </div>
+              </div>`
+        }
+        <button class="connect" data-action="connect">${hasId ? "Log in with Twitch" : "Connect with Twitch"}</button>
         <button class="demo" data-action="demo">View demo with sample data</button>
       </div>`;
     $("#topbar").innerHTML = `
@@ -805,7 +816,8 @@
 
     switch (action) {
       case "connect": {
-        const v = $("#setup-client").value.trim();
+        const inp = $("#setup-client");
+        const v = inp ? inp.value.trim() : "";
         if (v) {
           S.clientId = v;
           save(STORE.clientId, v);

@@ -36,8 +36,6 @@ Twitch token lives only in your browser’s `localStorage`.
 - 🔎 **Category autocomplete** — type to search Twitch categories and pick the
   exact match (no typos / "couldn't find" errors); **View** a tracked category's
   live streams on demand.
-  viewer count (configurable band + viewer ceiling); track extra categories and
-  Load More.
 - 🔄 **Auto-refresh** on a timer; token expiry is detected and you’re prompted
   to reconnect.
 - 📱 **Compact mode** for narrow docks.
@@ -61,32 +59,35 @@ smart” experience without a backend.
 
 ---
 
-## 🚀 Setup (2 minutes)
+## 🚀 Setup
 
-### 1. Create a Twitch application
-1. Go to <https://dev.twitch.tv/console/apps> and **Register Your Application**.
-2. Name it anything (e.g. “Clawraid”).
-3. **OAuth Redirect URLs** → add the exact URL where you’ll host the dock
-   (e.g. `https://yourname.github.io/clawraid/`). **Must match exactly.**
-4. **Client Type** → *Public*.
-5. Copy the **Client ID**.
+Twitch’s “Log in with Twitch” always needs a **Client ID** — there’s no way
+around it. So you (the owner) create *one* Twitch app, and your users just log in.
+Two flavors:
 
-### 2. Run the dock
-- **GitHub Pages (recommended for sharing):** fork/clone this repo, enable
-  Pages (Settings ▸ Pages ▸ branch `main`, folder `/root`), and open the site.
-- **Locally:** serve the folder with any static server, e.g.
-  `python3 -m http.server 8080` then open `http://localhost:8080`.
+### A. Zero-setup for your viewers (recommended for sharing)
+1. Create one Twitch app at <https://dev.twitch.tv/console/apps> — Name: `Clawraid`,
+   **Client Type → Public**, and **OAuth Redirect URLs** → the exact URL you’ll
+   host at (e.g. `https://yourname.github.io/clawraid/`). **Must match exactly.**
+2. Open `app.js` and paste your **Client ID** into `EMBEDDED_CLIENT_ID` (top of the
+   file). That’s the only setup — your visitors never see the dev console.
+3. Host it (GitHub Pages: enable Pages on `main` / `/root`), then share the link.
+4. Visitors click **Log in with Twitch**, approve the scopes, and it works.
 
-On first load, paste your **Client ID** and click **Connect with Twitch**. Approve
-the requested scopes:
+> ⚠️ A shared Client ID shares Twitch’s API rate limit across all users. Fine for
+> a community tool; for very heavy use, use option B.
 
+### B. Each user supplies their own Client ID (no shared limit)
+If `EMBEDDED_CLIENT_ID` is left empty, the dock shows a Client ID field on first
+load. Each user registers their own Twitch app and pastes the ID. Use this if you
+prefer not to share one ID, or are self-hosting at a different URL.
+
+### Approved scopes
 | Scope | Why |
 | --- | --- |
 | `user:read:follows` | Read your followed (live) channels |
 | `user:edit:follows` | Follow suggested channels from the dock |
 | `channel:manage:raids` | *(optional)* start raids from the dock |
-
-That’s it — the dock loads your live follows, categories, and suggestions.
 
 ---
 
@@ -110,12 +111,10 @@ That’s it — the dock loads your live follows, categories, and suggestions.
 ## 🌐 Hosting on GitHub (share with others)
 
 This is a static site — perfect for GitHub Pages. Push the contents of this
-folder to a repo, enable Pages, and share the link. Each user still connects
-**their own** Twitch account (per-user Client ID is the ToS-friendly model).
-
-Optional: self-hosted shared Client ID — copy `config.example.js` to `config.js`,
-fill in your Client ID, and commit `config.js` (it’s git-ignored by default).
-Only do this on your own domain; a public shared ID will hit rate limits.
+folder to a repo, enable Pages (branch `main`, folder `/root`), and share the
+link. With `EMBEDDED_CLIENT_ID` set, **your users just click Log in with Twitch**
+— no per-user setup. Each user still connects **their own** Twitch account; only
+the Client ID is shared.
 
 A `publish.sh` helper is included to scaffold a repo & push (see below).
 
