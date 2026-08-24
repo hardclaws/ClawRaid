@@ -226,6 +226,12 @@ html, body {
 .langopt input { accent-color: var(--accent); }
 .sortdir { background: var(--bg-3); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 5px 8px; font-size: 12px; cursor: pointer; margin-left: 6px; }
 .sortdir:hover { background: var(--bg-hover); }
+.taglink { cursor: pointer; }
+.taglink:hover { color: var(--accent); border-color: var(--accent); }
+.activefilter { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+.activefilter b { color: var(--text); }
+.xfilter { background: var(--bg-3); border: 1px solid var(--border); color: var(--text); border-radius: 4px; cursor: pointer; padding: 1px 7px; font-size: 12px; }
+.xfilter:hover { background: var(--bg-hover); }
 
 /* Tracked-category thumbnail */
 .catthumb { width: 32px; height: 44px; object-fit: cover; border-radius: 4px; background: var(--bg); margin-right: 4px; }
@@ -345,7 +351,8 @@ html, body {
 }
 .app.compact .card .name { font-size: 11px; }
 .app.compact .card .meta { font-size: 10px; }
-.app.compact .card .tags { display: none; }
+.app.compact .card .tags { display: flex; margin-top: 2px; }
+.app.compact .card .tag { font-size: 9px; padding: 1px 5px; }
 .app.compact .card .actions { margin-top: 2px; gap: 4px; flex-wrap: wrap; }
 .app.compact .btn { padding: 3px 6px; font-size: 10px; border-radius: 5px; gap: 3px; }
 .app.compact .btn svg { width: 11px; height: 11px; }
