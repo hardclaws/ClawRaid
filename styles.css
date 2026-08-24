@@ -214,13 +214,18 @@ html, body {
 .catlink { color: var(--accent); cursor: pointer; }
 .catlink:hover { text-decoration: underline; }
 
-/* Language filter (Discover) */
-.langfilter { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 10px; }
-.lf-label { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .5px; margin-right: 2px; }
-.langchip { background: var(--bg-3); border: 1px solid var(--border); color: var(--text-dim); border-radius: 999px; padding: 3px 10px; font-size: 11px; cursor: pointer; }
-.langchip.on { color: var(--text); border-color: var(--accent); }
-.langchip.off { opacity: .45; text-decoration: line-through; }
-.langchip:hover { border-color: var(--accent); }
+/* Language dropdown (single-line, tickable) */
+.langdrop { display: inline-block; position: relative; }
+.langdrop > summary { list-style: none; cursor: pointer; background: var(--bg-3); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 5px 10px; font-size: 12px; user-select: none; }
+.langdrop > summary::-webkit-details-marker { display: none; }
+.langdrop > summary::after { content: " ▾"; opacity: .6; }
+.langcount { color: var(--text-faint); margin-left: 4px; }
+.langpop { position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px; min-width: 170px; max-height: 220px; overflow: auto; box-shadow: var(--shadow); }
+.langallbtn { width: 100%; text-align: left; background: transparent; border: none; color: var(--accent); cursor: pointer; font-size: 12px; padding: 4px 2px 8px; }
+.langopt { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 3px 2px; cursor: pointer; }
+.langopt input { accent-color: var(--accent); }
+.sortdir { background: var(--bg-3); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 5px 8px; font-size: 12px; cursor: pointer; margin-left: 6px; }
+.sortdir:hover { background: var(--bg-hover); }
 
 /* Tracked-category thumbnail */
 .catthumb { width: 32px; height: 44px; object-fit: cover; border-radius: 4px; background: var(--bg); margin-right: 4px; }
