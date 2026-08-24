@@ -498,6 +498,11 @@
     if (hide.size === 0) return list || [];
     return (list || []).filter((s) => !s.language || !hide.has(s.language));
   }
+  function tagOk(s) {
+    if (!S.tagFilter) return true;
+    const t = S.tagFilter.toLowerCase();
+    return (s.tags || []).some((x) => (x || "").toLowerCase() === t);
+  }
   function sortControl() {
     const opts = [
       ["viewers-desc", "Viewers (high → low)"],
@@ -531,6 +536,11 @@
           .join("")}
       </div></details>`;
   }
+  function tagFilterBar() {
+    if (!S.tagFilter) return "";
+    return `<div class="activefilter">Filtering by tag: <b>${esc(S.tagFilter)}</b> <button class="xfilter" data-action="clear-tag">✕</button></div>`;
+  }
+
   function sectionHead(title, sub) {
     return `<div class="sechead"><h2>${title}</h2>${sub ? `<div class="sechead-sub">${sub}</div>` : ""}</div>`;
   }
@@ -546,7 +556,7 @@
       thumb = placeholder(s.user_login || s.user_name, 320, 180, (s.user_name || "?").slice(0, 2));
     }
     const isFollowed = S.followedIds && S.followedIds.has(s.user_id);
-    const tags = (s.tags || []).slice(0, 4).map((t) => `<span class="tag">${esc(t)}</span>`).join("");
+    const tags = (s.tags || []).slice(0, 4).map((t) => `<span class="tag taglink" data-action="tag-filter" data-tag="${esc(t)}">${esc(t)}</span>`).join("");
     const raidBtn = settings.raidsEnabled
       ? `<button class="btn raid" data-action="raid" data-uid="${esc(s.user_id)}" data-login="${esc(s.user_login)}">${ICON.bolt} Raid</button>`
       : "";
@@ -614,6 +624,7 @@
     if (tab === "same") renderSame(tc, match);
     else if (tab === "following") renderFollowing(tc, match);
     else if (tab === "discover") renderDiscover(tc, match);
+    if (S.tagFilter) tc.innerHTML = tagFilterBar() + tc.innerHTML;
   }
 
   function renderSame(tc, match) {
@@ -622,8 +633,8 @@
       return;
     }
     const all = S.sameGameStreams;
-    const followed = sortStreams(all.filter((s) => S.followedIds && S.followedIds.has(s.user_id))).filter(match);
-    const others = sortStreams(all.filter((s) => !(S.followedIds && S.followedIds.has(s.user_id)))).filter(match);
+    const followed = sortStreams(all.filter((s) => S.followedIds && S.followedIds.has(s.user_id))).filter(match).filter(tagOk);
+    const others = sortStreams(all.filter((s) => !(S.followedIds && S.followedIds.has(s.user_id)))).filter(match).filter(tagOk);
     let html = sectionHead("Same Game", `Everyone live in <b>${esc(S.myGameName)}</b> — people you follow are listed first.`) + sortControl();
     if (followed.length) html += `<h3 class="subhead">People you follow (${followed.length})</h3>` + followed.map(streamCard).join("");
     if (others.length) html += `<h3 class="subhead">Others in ${esc(S.myGameName)} (${others.length})</h3>` + others.map(streamCard).join("");
@@ -632,7 +643,7 @@
   }
 
   function renderFollowing(tc, match) {
-    const list = sortStreams(S.followedStreams).filter(match);
+    const list = sortStreams(S.followedStreams).filter(match).filter(tagOk);
     tc.innerHTML =
       sectionHead("Following", "Everyone you follow who is live. Click a <b>category name</b> to jump to Discover filtered to it.") +
       sortControl() +
@@ -662,7 +673,7 @@
     ensureCategoryArt();
     // Filtered view: everyone live in a specific category.
     if (S.filterGame) {
-      const streams = applyLang(sortStreams(S.filterStreams || []).filter(match));
+      const streams = applyLang(sortStreams(S.filterStreams || []).filter(match)).filter(tagOk);
       const langs = langSet(S.filterStreams || []);
       S._langOptions = langs;
       const fthumb = S.filterGame.box_art_url ? `<img class="catthumb" src="${thumbUrl(S.filterGame.box_art_url, 40, 56)}" alt=""/>` : "";
@@ -675,7 +686,7 @@
       return;
     }
 
-    const list = applyLang(sortStreams(S.discoverStreams || []).filter(match));
+    const list = applyLang(sortStreams(S.discoverStreams || []).filter(match)).filter(tagOk);
     const langs = langSet(S.discoverStreams || []);
     S._langOptions = langs;
     const hint = S.myGameId
@@ -685,7 +696,7 @@
     const catManage = settings.categories
       .map((cat) => {
         const open = S.viewOpen.has(cat.id);
-        const streams = open ? sortStreams(S.viewCache[cat.id] || []) : null;
+        const streams = open ? sortStreams(S.viewCache[cat.id] || []).filter(tagOk) : null;
         const thumb = cat.box_art_url ? `<img class="catthumb" src="${thumbUrl(cat.box_art_url, 40, 56)}" alt=""/>` : "";
         return `
         <div class="catmanage">
@@ -1055,6 +1066,14 @@
         S.filterGame = null;
         S.filterStreams = null;
         selectTab("discover");
+        break;
+      case "tag-filter":
+        S.tagFilter = btn.dataset.tag;
+        renderTabs();
+        break;
+      case "clear-tag":
+        S.tagFilter = null;
+        renderTabs();
         break;
       case "lang-all":
         settings.langHide = [];
