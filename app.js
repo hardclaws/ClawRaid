@@ -25,7 +25,7 @@
   // Owner: paste your Twitch Client ID here to enable ZERO-SETUP login.
   // The Client ID is public by design (sent in every request). Leave blank to
   // let each user supply their own.
-  const EMBEDDED_CLIENT_ID = "t0bhs24dpvhywo3mhzw88rcrjhrtfm";
+  const EMBEDDED_CLIENT_ID = "";
 
   const STORE = {
     clientId: "rd_client_id",
@@ -46,7 +46,7 @@
     categories: [],
     compact: true,
     discoverFirst: 30,
-    langAllow: [], // empty = show all languages; else only these
+    langHide: [], // empty = show all languages; listed codes are hidden
     cardThumb: "live", // "live" (stream preview) or "avatar" (profile picture)
     autoReconnect: true,
   };
@@ -72,7 +72,7 @@
     langHide: new Set(), // hidden language codes in Discover
     _viewLoading: null,
     sort: "viewers-desc",
-    sortDir: "desc",
+    sortDirs: { recent: "desc", category: "asc" },
     activeTab: null,
     searchTerm: "",
     demo: false,
@@ -372,6 +372,10 @@
       return;
     }
     if (!isTokenValid()) {
+      if (settings.autoReconnect && S.token && S.clientId) {
+        login();
+        return;
+      }
       renderLogin();
       return;
     }
@@ -474,10 +478,10 @@
         arr.sort((a, b) => (a.viewer_count || 0) - (b.viewer_count || 0));
         break;
       case "recent":
-        arr.sort((a, b) => (S.sortDir === "asc" ? new Date(a.started_at) - new Date(b.started_at) : new Date(b.started_at) - new Date(a.started_at)));
+        arr.sort((a, b) => (S.sortDirs.recent === "asc" ? new Date(a.started_at) - new Date(b.started_at) : new Date(b.started_at) - new Date(a.started_at)));
         break;
       case "category":
-        arr.sort((a, b) => (S.sortDir === "asc" ? (a.game_name || "").localeCompare(b.game_name || "") : (b.game_name || "").localeCompare(a.game_name || "")));
+        arr.sort((a, b) => (S.sortDirs.category === "asc" ? (a.game_name || "").localeCompare(b.game_name || "") : (b.game_name || "").localeCompare(a.game_name || "")));
         break;
       default:
         arr.sort((a, b) => (b.viewer_count || 0) - (a.viewer_count || 0));
@@ -490,9 +494,9 @@
     return Array.from(set).sort();
   }
   function applyLang(list) {
-    const allow = new Set(settings.langAllow || []);
-    if (allow.size === 0) return list || [];
-    return (list || []).filter((s) => !s.language || allow.has(s.language));
+    const hide = new Set(settings.langHide || []);
+    if (hide.size === 0) return list || [];
+    return (list || []).filter((s) => !s.language || !hide.has(s.language));
   }
   function sortControl() {
     const opts = [
@@ -503,10 +507,11 @@
     ];
     let dirBtn = "";
     if (S.sort === "recent" || S.sort === "category") {
+      const dir = S.sortDirs[S.sort];
       const label =
         S.sort === "recent"
-          ? S.sortDir === "asc" ? "Oldest first ↑" : "Newest first ↓"
-          : S.sortDir === "asc" ? "A–Z ↑" : "Z–A ↓";
+          ? dir === "asc" ? "Oldest first ↑" : "Newest first ↓"
+          : dir === "asc" ? "A–Z ↑" : "Z–A ↓";
       dirBtn = ` <button class="sortdir" data-action="sort-dir" title="Toggle sort direction">${label}</button>`;
     }
     return `<div class="sortrow"><label>Sort</label><select class="sortsel">${opts
@@ -514,14 +519,15 @@
       .join("")}</select>${dirBtn}</div>`;
   }
   function langFilterChips(langs) {
-    const allow = new Set(settings.langAllow || []);
-    const allOn = allow.size === 0;
-    const count = allOn ? "All" : allow.size + " selected";
+    const hide = new Set(settings.langHide || []);
+    const hidden = langs.filter((l) => hide.has(l)).length;
+    const count = hidden === 0 ? "All" : langs.length - hidden + " shown";
     return `<details class="langdrop"><summary>Languages <span class="langcount">${count}</span></summary>
       <div class="langpop">
-        <button class="langallbtn" data-action="lang-all">All languages</button>
+        <button class="langallbtn" data-action="lang-all">Select all</button>
+        <button class="langallbtn" data-action="lang-none">Deselect all</button>
         ${langs
-          .map((l) => `<label class="langopt"><input type="checkbox" class="langchk" data-lang="${esc(l)}" ${allOn || allow.has(l) ? "checked" : ""}/> ${esc(l)}</label>`)
+          .map((l) => `<label class="langopt"><input type="checkbox" class="langchk" data-lang="${esc(l)}" ${hide.has(l) ? "" : "checked"}/> ${esc(l)}</label>`)
           .join("")}
       </div></details>`;
   }
@@ -658,18 +664,20 @@
     if (S.filterGame) {
       const streams = applyLang(sortStreams(S.filterStreams || []).filter(match));
       const langs = langSet(S.filterStreams || []);
+      S._langOptions = langs;
       const fthumb = S.filterGame.box_art_url ? `<img class="catthumb" src="${thumbUrl(S.filterGame.box_art_url, 40, 56)}" alt=""/>` : "";
       tc.innerHTML =
         `<div class="sechead"><div style="display:flex;align-items:center;gap:8px"><h2>Discover</h2>${fthumb}<span>${esc(S.filterGame.name)}</span></div></div>` +
         `<button class="btn" data-action="clear-filter" style="margin:0 0 8px">✕ Clear filter</button>` +
         sortControl() +
         langFilterChips(langs) +
-        (streams.length ? streams.map(streamCard).join("") : emptyState("No one is live in " + esc(S.filterGame.name) + " right now."));
+        (streams.length ? streams.map((s) => streamCard(s, { catLink: true })).join("") : emptyState("No one is live in " + esc(S.filterGame.name) + " right now."));
       return;
     }
 
     const list = applyLang(sortStreams(S.discoverStreams || []).filter(match));
     const langs = langSet(S.discoverStreams || []);
+    S._langOptions = langs;
     const hint = S.myGameId
       ? `Live channels in <b>${esc(S.myGameName)}</b> + your tracked categories that you don't follow yet.`
       : `Live channels in your tracked/derived categories you don't follow yet.` + (S.meViewers > 0 ? ` Sized near your ${fmt(S.meViewers)} viewers.` : "");
@@ -693,7 +701,7 @@
                   S._viewLoading === cat.id
                     ? `<div class="loading">Loading live channels…</div>`
                     : streams.length
-                    ? streams.map(streamCard).join("")
+                    ? streams.map((s) => streamCard(s, { catLink: true })).join("")
                     : emptyState("No live streams in " + esc(cat.name) + " right now.")
                 }</div>`
               : ""
@@ -710,7 +718,7 @@
       ${settings.categories.length ? `<div class="cats">${catManage}</div>` : `<div class="hint" style="font-size:11px;color:var(--text-faint);margin:4px 0 8px">No categories tracked yet — search above and pick a match, or type a name and hit + Track.</div>`}
       <h3 class="subhead">Not-yet-followed (Discover)</h3>
       ${sortControl()}
-      ${list.length ? list.map(streamCard).join("") : emptyState("No discoveries right now. Track more categories or widen the size filter in Settings.")}
+      ${list.length ? list.map((s) => streamCard(s, { catLink: true })).join("") : emptyState("No discoveries right now. Track more categories or widen the size filter in Settings.")}
       ${S.discoverFirst < 100 && (S.discoverStreams || []).length ? `<button class="btn" data-action="discover-more" style="margin-top:8px">Load More</button>` : ""}`;
   }
 
@@ -947,7 +955,7 @@
         selectTab(btn.dataset.tab);
         break;
       case "sort-dir":
-        S.sortDir = S.sortDir === "asc" ? "desc" : "asc";
+        S.sortDirs[S.sort] = S.sortDirs[S.sort] === "asc" ? "desc" : "asc";
         selectTab(S.activeTab || "discover");
         break;
       case "open":
@@ -1049,20 +1057,15 @@
         selectTab("discover");
         break;
       case "lang-all":
-        settings.langAllow = [];
+        settings.langHide = [];
         saveSettings();
         selectTab("discover");
         break;
-      case "lang-toggle": {
-        const l = btn.dataset.lang;
-        const allow = new Set(settings.langAllow || []);
-        if (allow.has(l)) allow.delete(l);
-        else allow.add(l);
-        settings.langAllow = Array.from(allow);
+      case "lang-none":
+        settings.langHide = (S._langOptions || []).slice();
         saveSettings();
         selectTab("discover");
         break;
-      }
       case "remove-cat": {
         const name = btn.dataset.name;
         settings.categories = settings.categories.filter((c) => c.name !== name);
@@ -1201,10 +1204,10 @@
         selectTab(S.activeTab || "discover");
       } else if (e.target.classList.contains("langchk")) {
         const l = e.target.dataset.lang;
-        const allow = new Set(settings.langAllow || []);
-        if (e.target.checked) allow.add(l);
-        else allow.delete(l);
-        settings.langAllow = Array.from(allow);
+        const hide = new Set(settings.langHide || []);
+        if (e.target.checked) hide.delete(l);
+        else hide.add(l);
+        settings.langHide = Array.from(hide);
         saveSettings();
         selectTab("discover");
       }
@@ -1231,6 +1234,7 @@
       refreshAll(true);
     } else {
       if (hadRedirect && !isTokenValid()) toast("Couldn't sign in — check your Client ID & redirect URL.", "err");
+      if (settings.autoReconnect && S.token && S.clientId) { login(); return; }
       renderLogin();
     }
   }
