@@ -72,6 +72,7 @@
     langHide: new Set(), // hidden language codes in Discover
     _viewLoading: null,
     sort: "viewers-desc",
+    sortDir: "desc",
     activeTab: null,
     searchTerm: "",
     demo: false,
@@ -473,10 +474,10 @@
         arr.sort((a, b) => (a.viewer_count || 0) - (b.viewer_count || 0));
         break;
       case "recent":
-        arr.sort((a, b) => new Date(b.started_at) - new Date(a.started_at));
+        arr.sort((a, b) => (S.sortDir === "asc" ? new Date(a.started_at) - new Date(b.started_at) : new Date(b.started_at) - new Date(a.started_at)));
         break;
       case "category":
-        arr.sort((a, b) => (a.game_name || "").localeCompare(b.game_name || ""));
+        arr.sort((a, b) => (S.sortDir === "asc" ? (a.game_name || "").localeCompare(b.game_name || "") : (b.game_name || "").localeCompare(a.game_name || "")));
         break;
       default:
         arr.sort((a, b) => (b.viewer_count || 0) - (a.viewer_count || 0));
@@ -500,18 +501,29 @@
       ["recent", "Recently started"],
       ["category", "Category"],
     ];
+    let dirBtn = "";
+    if (S.sort === "recent" || S.sort === "category") {
+      const label =
+        S.sort === "recent"
+          ? S.sortDir === "asc" ? "Oldest first ↑" : "Newest first ↓"
+          : S.sortDir === "asc" ? "A–Z ↑" : "Z–A ↓";
+      dirBtn = ` <button class="sortdir" data-action="sort-dir" title="Toggle sort direction">${label}</button>`;
+    }
     return `<div class="sortrow"><label>Sort</label><select class="sortsel">${opts
       .map(([v, l]) => `<option value="${v}" ${S.sort === v ? "selected" : ""}>${l}</option>`)
-      .join("")}</select></div>`;
+      .join("")}</select>${dirBtn}</div>`;
   }
   function langFilterChips(langs) {
     const allow = new Set(settings.langAllow || []);
     const allOn = allow.size === 0;
-    return `<div class="langfilter"><span class="lf-label">Show:</span>
-      <button class="langchip ${allOn ? "on" : ""}" data-action="lang-all">All</button>
-      ${langs
-        .map((l) => `<button class="langchip ${allOn || allow.has(l) ? "on" : "off"}" data-action="lang-toggle" data-lang="${esc(l)}">${esc(l)}</button>`)
-        .join("")}</div>`;
+    const count = allOn ? "All" : allow.size + " selected";
+    return `<details class="langdrop"><summary>Languages <span class="langcount">${count}</span></summary>
+      <div class="langpop">
+        <button class="langallbtn" data-action="lang-all">All languages</button>
+        ${langs
+          .map((l) => `<label class="langopt"><input type="checkbox" class="langchk" data-lang="${esc(l)}" ${allOn || allow.has(l) ? "checked" : ""}/> ${esc(l)}</label>`)
+          .join("")}
+      </div></details>`;
   }
   function sectionHead(title, sub) {
     return `<div class="sechead"><h2>${title}</h2>${sub ? `<div class="sechead-sub">${sub}</div>` : ""}</div>`;
@@ -934,6 +946,10 @@
       case "tab":
         selectTab(btn.dataset.tab);
         break;
+      case "sort-dir":
+        S.sortDir = S.sortDir === "asc" ? "desc" : "asc";
+        selectTab(S.activeTab || "discover");
+        break;
       case "open":
         window.open("https://www.twitch.tv/" + btn.dataset.login, "_blank");
         break;
@@ -1179,9 +1195,18 @@
       }
     });
     document.addEventListener("change", (e) => {
-      if (e.target && e.target.classList && e.target.classList.contains("sortsel")) {
+      if (!e.target || !e.target.classList) return;
+      if (e.target.classList.contains("sortsel")) {
         S.sort = e.target.value;
         selectTab(S.activeTab || "discover");
+      } else if (e.target.classList.contains("langchk")) {
+        const l = e.target.dataset.lang;
+        const allow = new Set(settings.langAllow || []);
+        if (e.target.checked) allow.add(l);
+        else allow.delete(l);
+        settings.langAllow = Array.from(allow);
+        saveSettings();
+        selectTab("discover");
       }
     });
     document.addEventListener("keydown", (e) => {
